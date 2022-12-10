@@ -18,9 +18,9 @@ def load_args():
     parser = argparse.ArgumentParser(description='Spherical GMM')
 
     # Model
-    parser.add_argument('--data_path', default='../dataset/mnist', type=str, metavar='XXX', help='Path to the model')
-    parser.add_argument('--batch_size', default=40, type=int, metavar='N', help='Batch size of test set')
-    parser.add_argument('--num_epochs', default=300, type=int, metavar='N', help='Epoch to run')
+    parser.add_argument('--data_path', default='data', type=str, metavar='XXX', help='Path to the model')
+    parser.add_argument('--batch_size', default=5, type=int, metavar='N', help='Batch size of test set')
+    parser.add_argument('--num_epochs', default=2, type=int, metavar='N', help='Epoch to run')
     parser.add_argument('--num_points', default=512, type=int, metavar='N', help='Number of points in a image')
     parser.add_argument('--log_interval', default=1000, type=int, metavar='N', help='log_interval')
     parser.add_argument('--baselr', default=5e-5, type=float, metavar='N', help='learning rate')
@@ -98,10 +98,37 @@ def load_data_h5(params, data_type, shuffle=True, num_workers=4, rotate=False, b
     data_dir = params['{}_dir'.format(data_type)]
     batch_size = params['batch_size']
     
-    train_data = h5py.File(data_dir + "_data.h5", 'r')
-    train_labels = h5py.File(data_dir + "_label.h5", 'r')
-    xs = np.array(train_data['data'])
-    xs = np.delete(xs, 1, 2)
+    # train_data = h5py.File(data_dir + "_data.h5", 'r')
+    # train_labels = h5py.File(data_dir + "_label.h5", 'r')
+
+    # full_data =  h5py.File( "data/full_dataset_vectors.h5", 'r')
+
+
+    with h5py.File( "data/full_dataset_vectors.h5", "r") as hf:    
+        # Split the data into training/test features/targets
+        #to run without gpu/cuda, we only use 500 for training and 100 for test
+        x_train = hf["X_train"][:500]
+        y_train = hf["y_train"][:500]
+        x_test = hf["X_test"][:100] 
+        y_test = hf["y_test"][:100]
+    # print()
+
+    if data_type == "train":
+        xs = np.array(x_train)
+        xs = np.expand_dims(xs, axis=2)
+        # ys = np.array(y_train['label'])
+        ys = np.array(y_train)
+    else: 
+        xs = np.array(x_test)
+        xs = np.expand_dims(xs, axis=2)
+        # ys = np.array(y_train['label'])
+        ys = np.array(y_test)
+    # print(xs)
+    print(xs.shape)
+
+
+    # xs = np.array(x_train['data'])
+    # xs = np.delete(xs, 1, 2)
     if rotate:
         if batch:
             b = xs.shape[0]
@@ -110,11 +137,12 @@ def load_data_h5(params, data_type, shuffle=True, num_workers=4, rotate=False, b
             rotation_matrix = rotate_random(params['rotate_deflection'])
             xs = np.dot(xs, rotation_matrix)
 
-    ys = np.array(train_labels['label'])
+    
+
     train_loader = torch.utils.data.TensorDataset(torch.from_numpy(xs).float(), torch.from_numpy(ys).long())
     train_loader_dataset = torch.utils.data.DataLoader(train_loader, batch_size=batch_size, shuffle=shuffle,
                                                        num_workers=num_workers)
-    train_data.close()
+    # train_data.close()
     return train_loader_dataset
 
 
@@ -270,7 +298,7 @@ def get_grids(b, num_grids, base_radius=1, center=[0, 0, 0], grid_type="Driscoll
         grid = grid.transpose(0, 1)  # -> [4b^2, 3]
 
         grid = grid.view(2 * b, 2 * b, 3)  # -> [2b, 2b, 3]
-        grid = grid.float().cuda()
+        grid = grid.float() 
 
         grids.append( (radius, grid) )
 
@@ -367,10 +395,12 @@ def data_mapping(inputs, base_radius=1):
     inputs : [B, N, 3]
     return : [B, N, 3]
     """
+    # B, N, D = inputs.size()
     B, N, D = inputs.size()
 
+
     # Radiactively Mapping -> let k = sqrt(x^2 + y^2 + z^2); ratio = radius / k; update x,y,z = (x,y,z) * ratio
-    k, _ = torch.max(torch.sqrt(torch.sum(torch.pow(inputs, 2), dim=2, keepdim=True)), dim=1,
+    k, _ = torch.max(torch.sqrt(torch.sum(torch.pow(inputs, 2), dim= 2, keepdim=True)), dim=1,
                      keepdim=True)  # [B, 1, 1])
     k = k.float()
     ratio = base_radius / k
@@ -387,7 +417,7 @@ def density_mapping(b, inputs, data_index, density_radius, sphere_radius, s2_gri
     """
 
     B, N, D = inputs.size()
-
+    D = 3
     # Get Weights
     if use_weights:
         dists = pairwise_distance(inputs)  # -> [B, N, N]
@@ -404,13 +434,13 @@ def density_mapping(b, inputs, data_index, density_radius, sphere_radius, s2_gri
     # If Use Static Sigma
     if use_static_sigma:
         # [Use Static Sigma] For Testing With Static Sigma
-        sigma_diag = torch.tensor([static_sigma, static_sigma, static_sigma]).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(B, N, 1, 1).cuda()
+        sigma_diag = torch.tensor([static_sigma, static_sigma, static_sigma]).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(B, N, 1, 1) 
     else:
         # Calculate Sigma [Covariance]
         sigma = torch.matmul(numerator.transpose(2, 3), numerator)  # -> [B, N, 3, 3]
         sigma = sigma / (4 * (b ** 2))
 
-        index = torch.tensor([[0, 1, 2], [0, 1, 2], [0, 1, 2]]).cuda()
+        index = torch.tensor([[0, 1, 2], [0, 1, 2], [0, 1, 2]]) 
         index = index.unsqueeze(0).unsqueeze(0)
         index = index.repeat(B, N, 1, 1)
         sigma_diag = torch.gather(sigma, 2, index)  # -> [B, N, 3, 3] -> [[diag1, diag2, diag3] * 3]
@@ -440,7 +470,7 @@ def density_mapping(b, inputs, data_index, density_radius, sphere_radius, s2_gri
     sigma_det = torch.prod(sigma_diag, dim=3)  # -> [B, N, 1]
 
     denominator = torch.sqrt(torch.pow(sigma_det, D))  # -> [B, N, 1]
-    denominator = denominator.cuda()
+    denominator = denominator 
 
     density = numerator / denominator  # -> [B, N, 4b^2]
     
@@ -488,7 +518,7 @@ def data_sphere_cropping(data, center, inner_radius, radius):
     :param radius: upper line for the croption
     :return: [B, N, 3] where only valid points have value and others all zeros
     """
-    center = torch.Tensor(center).view(1, 1, 3).cuda()
+    center = torch.Tensor(center).view(1, 1, 3) 
     distances = torch.sqrt(torch.sum(torch.pow(data - center, 2), dim=2, keepdim=True)) # [B, N, 1]
 
     index_lower = distances >= inner_radius
@@ -504,8 +534,8 @@ def data_sphere_translation(inputs, s2_grids, params):
     s2_grids: [[center, [(radius, tensor([2b, 2b, 3])) * num_grids]] * num_centers]
     :return: list( list( Tensor([B, 2b, 2b]) * num_grids ) * num_centers)
     """
-    B, N, D = inputs.size()
-    inputs = inputs.cuda()
+    B, N,D = inputs.size()
+    inputs = inputs 
     
     all_mappings = []
     for center, grids in s2_grids:
@@ -536,3 +566,26 @@ def data_sphere_translation(inputs, s2_grids, params):
 
 def euclidean_distance(p1, p2):
     return np.sqrt(sum(np.square(np.array(list(map(lambda x: x[0] - x[1], zip(p1, p2)))))))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# END

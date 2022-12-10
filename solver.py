@@ -3,16 +3,13 @@ import torch.nn as nn
 import torch.utils.data
 import torch.nn.functional as F
 from torch.autograd import Variable
-
 import os
 import time
 import datetime
 import h5py
 import numpy as np
-
 import utils
 from os.path import join
-from logger import setup_logger
 import lie_learn.spaces.S2 as S2
 from model import SphericalGMMNet
 from pdb import set_trace as st
@@ -22,9 +19,9 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def eval(model, params, logger, num_epochs=3, rotate=True):
+def eval(model, params, num_epochs=3, rotate=True):
+    print("eval")
     
-    logger.info("================================ Eval ================================\n")
     
     s2_grids = utils.get_sphere_grids(b=params['bandwidth_0'], num_grids=params['num_grids'], base_radius=params['base_radius'])
 
@@ -35,11 +32,11 @@ def eval(model, params, logger, num_epochs=3, rotate=True):
         with torch.no_grad():
             for _, (inputs, labels) in enumerate(test_iterator):
                 
-                inputs = Variable(inputs).cuda()
+                inputs = Variable(inputs)
                 B, N, D = inputs.size()
 
                 if inputs.shape[-1] == 2:
-                    zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype).cuda()
+                    zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype)
                     inputs = torch.cat((inputs, zero_padding), -1)  # [B, N, 3]
 
                 # Data Mapping
@@ -50,26 +47,21 @@ def eval(model, params, logger, num_epochs=3, rotate=True):
                 outputs = torch.argmax(outputs, dim=-1)
                 acc_all.append(np.mean(outputs.detach().cpu().numpy() == labels.numpy()))
             acc_overall.append(np.mean(np.array(acc_all)))
-            logger.info('[epoch {}] Accuracy: [{}]'.format(epoch, str(np.mean(np.array(acc_all)))))
-            
-    logger.info("======================================================================\n")
+        print("[Epoch:" ,epoch , "Acc:" , np.mean(np.array(acc_all)) ,"\n")
+                        
     return np.max(acc_overall)
 
 
 def test(params, model_name, num_epochs=1000):
-    logger = setup_logger("SphericalGMMNet")
-    logger.info("Loading Data")
 
-    # Load Data
-    logger.info("Model Setting Up")
 
+    print("Model Setting Up for test")
     # Model Configuration Setup
-    model = SphericalGMMNet(params).cuda()
-    model = model.cuda()
+    model = SphericalGMMNet(params)
+    model = model 
     if len(params['gpu'].split(",")) >= 2:
         model = nn.DataParallel(model)
 
-    logger.info('Loading the trained models from {model_name} ...'.format(model_name=model_name))
     model_path = os.path.join(params['save_dir'], '{model_name}'.format(model_name=model_name))
     model.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
 
@@ -81,11 +73,11 @@ def test(params, model_name, num_epochs=1000):
         acc_all = []
         with torch.no_grad():
             for _, (inputs, labels) in enumerate(test_iterator):
-                inputs = Variable(inputs).cuda()
+                inputs = Variable(inputs) 
                 B, N, D = inputs.size()
 
                 if inputs.shape[-1] == 2:
-                    zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype).cuda()
+                    zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype) 
                     inputs = torch.cat((inputs, zero_padding), -1)  # [B, N, 3]
 
                 # Data Mapping
@@ -98,29 +90,28 @@ def test(params, model_name, num_epochs=1000):
                 outputs = torch.argmax(outputs, dim=-1)
                 acc_all.append(np.mean(outputs.detach().cpu().numpy() == labels.numpy()))
 
-            logger.info('[epoch {}] Accuracy: [{}]'.format(epoch, str(np.mean(np.array(acc_all)))))
+            print("[Epoch:" ,epoch , "Acc:" , np.mean(np.array(acc_all)) ,"\n")
 
 
 def train(params):
-    # Logger Setup and OS Configuration
-    logger = setup_logger("SphericalGMMNet")
-    logger.info("Loading Data")
 
-    # Load Data
+    print("Loading Data")
+
+    # # Load Data
     train_iterator = utils.load_data_h5(params, data_type="train")
 
-    # Model Setup
-    logger.info("Model Setting Up")
+    # # Model Setup
+    print("Model Setting Up for train")
 
 
-    model = SphericalGMMNet(params).cuda()
-    model = model.cuda()
+    model = SphericalGMMNet(params) 
+    model = model 
     if len(params['gpu'].split(",")) >= 2:
         model = nn.DataParallel(model)
 
     # Model Configuration Setup
     optim = torch.optim.Adam(model.parameters(), lr=params['baselr'])
-    cls_criterion = torch.nn.CrossEntropyLoss().cuda()
+    cls_criterion = torch.nn.CrossEntropyLoss() 
 
     # Resume If Asked
     date_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -128,9 +119,6 @@ def train(params):
         model_path = os.path.join(params['save_dir'], params['resume_training'])
         model.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
 
-    # Display Parameters
-    for name, value in params.items():
-        logger.info("{name} : [{value}]".format(name=name, value=value))
 
     # Generate the grids
     s2_grids = utils.get_sphere_grids(b=params['bandwidth_0'], num_grids=params['num_grids'], base_radius=params['base_radius'])
@@ -144,31 +132,31 @@ def train(params):
     max_non_rotate_acc, max_rotate_acc = 0, 0
     
     # Iterate by Epoch
-    logger.info("Start Training")
+    print("Start Training")
     for epoch in range(params['num_epochs']):
-
+        print("epoch:")
+        print(epoch)
         # Save the model for each step
         if non_rotate_acc > max_non_rotate_acc:
             max_non_rotate_acc = non_rotate_acc
             save_path = os.path.join(params['save_dir'], '{date_time}-NR-[{acc}]-model.ckpt'.format(date_time=date_time, acc=non_rotate_acc))
             torch.save(model.state_dict(), save_path)
-            logger.info('Saved model checkpoints into {}...'.format(save_path))
         if rotate_acc > max_rotate_acc:
             max_rotate_acc = rotate_acc
             save_path = os.path.join(params['save_dir'], '{date_time}-R-[{acc}]-model.ckpt'.format(date_time=date_time, acc=rotate_acc))
             torch.save(model.state_dict(), save_path)
-            logger.info('Saved model checkpoints into {}...'.format(save_path))
 
         # Running Model
         running_loss = []
         for batch_idx, (inputs, labels) in enumerate(train_iterator):
-
             """ Variable Setup """
-            inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
-            B, N, D = inputs.size()
+            inputs, labels = Variable(inputs) , Variable(labels) 
+            # print(inputs)
+            # B, N, D = inputs.size()
+            B, N, D= inputs.size()
 
             if inputs.shape[-1] == 2:
-                zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype).cuda()
+                zero_padding = torch.zeros((B, N, 1), dtype=inputs.dtype) 
                 inputs = torch.cat((inputs, zero_padding), -1)  # [B, N, 3]
 
             # Data Mapping
@@ -203,6 +191,7 @@ def train(params):
                 inputs = utils.data_sphere_translation(inputs, s2_grids, params) # list( list( Tensor([B, 2b, 2b]) * num_grids ) * num_centers)
             
             """ Run Model """
+            # print("run model")
             outputs = model(inputs)
 
             """ Back Propagation """
@@ -211,35 +200,23 @@ def train(params):
             optim.step()
             running_loss.append(loss.item())
 
-            # Update Loss Per Batch
-            logger.info("Batch: [{batch}/{total_batch}] Epoch: [{epoch}] Loss: [{loss}]".format(batch=batch_idx,
-                                                                                                total_batch=len(
-                                                                                                    train_iterator),
-                                                                                                epoch=epoch,
-                                                                                                loss=np.mean(
-                                                                                                    running_loss)))
+            print("Batch: ", batch_idx , "Epoch:" ,epoch , "Loss:" , np.mean(running_loss) ,"\n")
 
-        non_rotate_acc = eval(model, params, logger, rotate=False)
-        logger.info(
-            "**************** [NR] Epoch: [{epoch}/{total_epoch}] Accuracy: [{acc}] ****************\n".format(epoch=epoch,
-                                                                                                          total_epoch=
-                                                                                                          params[
-                                                                                                              'num_epochs'],
-                                                                                                          loss=np.mean(
-                                                                                                              running_loss),
-                                                                                                          acc=non_rotate_acc))
+
+        non_rotate_acc = eval(model, params, rotate=False)
+        print("not rotate accuracy")
+        # print(non_rotate_acc)
+        print("Batch: ", batch_idx , "Epoch:" ,epoch , "Loss:" , np.mean(running_loss), "Acc: ", non_rotate_acc  ,"\n")
+
+
         
-        rotate_acc = eval(model, params, logger, rotate=True)
-        logger.info(
-            "**************** [R] Epoch: [{epoch}/{total_epoch}] Accuracy: [{acc}] ****************\n".format(epoch=epoch,
-                                                                                                          total_epoch=
-                                                                                                          params[
-                                                                                                              'num_epochs'],
-                                                                                                          loss=np.mean(
-                                                                                                              running_loss),
-                                                                                                          acc=rotate_acc))        
+        # rotate_acc = eval(model, params, rotate=True)
+        # print(" rotate accuracy")
+        # print(rotate_acc)
+        # print("Batch: ", batch_idx , "Epoch:" ,epoch , "Loss:" , np.mean(running_loss), "Acc: ", rotate_acc  ,"\n")
 
-    logger.info('Finished Training')
+
+    print("Finished Training")
 
 
 if __name__ == '__main__':
@@ -289,8 +266,10 @@ if __name__ == '__main__':
         'resume_training': args.resume_training,
     }
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = params['gpu']
+    # os.environ['CUDA_VISIBLE_DEVICES'] = params['gpu']
     if args.resume_testing:
         test(params, args.resume_testing)
     else:
         train(params)
+
+# END
